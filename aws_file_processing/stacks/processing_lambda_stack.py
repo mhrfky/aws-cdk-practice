@@ -9,9 +9,10 @@ from aws_cdk import (
 from constructs import Construct
 
 
-class ComputeStack(Stack):
+class ProcessingLambdaStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, *,
-                 bucket, queue, vpc, lambda_sg, **kwargs) -> None:
+                 bucket, queue, vpc, lambda_sg, timestream_db, timestream_events_table,
+                 timestream_file_types_table, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
         # Create IAM role for Lambda with fine-grained permissions
@@ -54,6 +55,20 @@ class ComputeStack(Stack):
                 resources=[queue.queue_arn]
             )
         )
+        lambda_role.add_to_policy(
+            iam.PolicyStatement(
+                actions=[
+                    "timestream:WriteRecords",
+                    "timestream:DescribeTable",
+                    "timestream:DescribeDatabase"
+                ],
+                resources=[
+                    timestream_db.attr_arn,
+                    f"{timestream_db.attr_arn}/table/{timestream_events_table.table_name}",
+                    f"{timestream_db.attr_arn}/table/{timestream_file_types_table.table_name}"
+                ]
+            )
+        )
 
         # Create Lambda function to process SQS messages
         self.processor_lambda = lambda_.Function(self, "FileProcessorFunction",
@@ -64,6 +79,8 @@ class ComputeStack(Stack):
                                                  environment={
                                                      "SQS_QUEUE_URL": queue.queue_url,
                                                      "BUCKET_NAME": bucket.bucket_name,
+                                                     "TIMESTREAM_DB_NAME": timestream_db.database_name,
+                                                     "TIMESTREAM_TABLE_NAME": timestream_events_table.table_name
                                                  },
                                                  role=lambda_role,
                                                  vpc=vpc,
