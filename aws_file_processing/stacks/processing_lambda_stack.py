@@ -11,8 +11,8 @@ from constructs import Construct
 
 class ProcessingLambdaStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, *,
-                 bucket, queue, vpc, lambda_sg, timestream_db, timestream_events_table,
-                 timestream_file_types_table, **kwargs) -> None:
+                 bucket, queue, vpc, lambda_sg, timestream_db_name,
+                 timestream_events_table_name, timestream_file_types_table_name, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
         # Create IAM role for Lambda with fine-grained permissions
@@ -67,9 +67,9 @@ class ProcessingLambdaStack(Stack):
                     "timestream:DescribeDatabase"
                 ],
                 resources=[
-                    f"arn:aws:timestream:{region}:{account}:database/{timestream_db}",
-                    f"arn:aws:timestream:{region}:{account}:database/{timestream_db}/table/{timestream_events_table}",
-                    f"arn:aws:timestream:{region}:{account}:database/{timestream_db}/table/{timestream_file_types_table}"
+                    f"arn:aws:timestream:{region}:{account}:database/{timestream_db_name}",
+                    f"arn:aws:timestream:{region}:{account}:database/{timestream_db_name}/table/{timestream_events_table_name}",
+                    f"arn:aws:timestream:{region}:{account}:database/{timestream_db_name}/table/{timestream_file_types_table_name}"
                 ]
             )
         )
@@ -83,8 +83,8 @@ class ProcessingLambdaStack(Stack):
                                                  environment={
                                                      "SQS_QUEUE_URL": queue.queue_url,
                                                      "BUCKET_NAME": bucket.bucket_name,
-                                                     "TIMESTREAM_DB_NAME": timestream_db.database_name,
-                                                     "TIMESTREAM_TABLE_NAME": timestream_events_table.table_name,
+                                                     "TIMESTREAM_DB_NAME": timestream_db_name,
+                                                     "TIMESTREAM_TABLE_NAME": timestream_events_table_name
                                                  },
                                                  role=lambda_role,
                                                  vpc=vpc,

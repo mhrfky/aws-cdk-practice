@@ -26,14 +26,14 @@ database_stack = DatabaseStack(app, "FileProcessingDatabase",
                               env=env)
 
 # Create compute stack (Lambda)
-compute_stack = ProcessingLambdaStack(app, "FileProcessingCompute",
-                                   bucket=storage_stack.bucket,
-                                   queue=storage_stack.queue,
-                                   vpc=networking_stack.vpc,
-                                   lambda_sg=networking_stack.lambda_sg,
-                                   timestream_db=database_stack.timestream_db,
-                                   timestream_events_table=database_stack.events_table,
-                                   timestream_file_types_table=database_stack.file_types_table,
-                                   env=env)
+processing_lambda_stack = ProcessingLambdaStack(app, "FileProcessingCompute",
+                          bucket=storage_stack.bucket,
+                          queue=storage_stack.queue,
+                          vpc=networking_stack.vpc,
+                          lambda_sg=networking_stack.lambda_sg,
+                          timestream_db_name=database_stack.database_name,
+                          timestream_events_table_name=database_stack.events_table_name,
+                          timestream_file_types_table_name=database_stack.file_types_table_name,
+                          env=env)
 
 app.synth()
