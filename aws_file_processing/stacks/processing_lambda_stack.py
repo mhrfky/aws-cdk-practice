@@ -55,6 +55,10 @@ class ProcessingLambdaStack(Stack):
                 resources=[queue.queue_arn]
             )
         )
+        # Add Timestream write permissions
+        region = Stack.of(self).region
+        account = Stack.of(self).account
+
         lambda_role.add_to_policy(
             iam.PolicyStatement(
                 actions=[
@@ -63,9 +67,9 @@ class ProcessingLambdaStack(Stack):
                     "timestream:DescribeDatabase"
                 ],
                 resources=[
-                    timestream_db.attr_arn,
-                    f"{timestream_db.attr_arn}/table/{timestream_events_table.table_name}",
-                    f"{timestream_db.attr_arn}/table/{timestream_file_types_table.table_name}"
+                    f"arn:aws:timestream:{region}:{account}:database/{timestream_db}",
+                    f"arn:aws:timestream:{region}:{account}:database/{timestream_db}/table/{timestream_events_table}",
+                    f"arn:aws:timestream:{region}:{account}:database/{timestream_db}/table/{timestream_file_types_table}"
                 ]
             )
         )
@@ -80,7 +84,7 @@ class ProcessingLambdaStack(Stack):
                                                      "SQS_QUEUE_URL": queue.queue_url,
                                                      "BUCKET_NAME": bucket.bucket_name,
                                                      "TIMESTREAM_DB_NAME": timestream_db.database_name,
-                                                     "TIMESTREAM_TABLE_NAME": timestream_events_table.table_name
+                                                     "TIMESTREAM_TABLE_NAME": timestream_events_table.table_name,
                                                  },
                                                  role=lambda_role,
                                                  vpc=vpc,
