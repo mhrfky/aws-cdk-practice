@@ -55,6 +55,7 @@ class ProcessingLambdaStack(Stack):
                 resources=[queue.queue_arn]
             )
         )
+
         # Add Timestream write permissions
         region = Stack.of(self).region
         account = Stack.of(self).account
