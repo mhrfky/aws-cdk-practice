@@ -1,4 +1,4 @@
-name: CDK Infrastructure Deployment
+name: Deploy Infrastructure
 
 on:
   push:
@@ -37,7 +37,7 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: eu-central-1
+          aws-region: eu-central-1  # Change to your region
 
       - name: Bootstrap CDK
         id: bootstrap
@@ -45,9 +45,7 @@ jobs:
         continue-on-error: false
 
       - name: CDK Diff (Preview changes)
-        if: steps.bootstrap.outcome == 'success'
         run: cdk diff
 
       - name: Deploy with CDK
-        if: steps.bootstrap.outcome == 'success'
         run: cdk deploy --all --require-approval never
