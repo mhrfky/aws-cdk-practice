@@ -64,7 +64,8 @@ class ProcessingLambdaStack(Stack):
                 actions=[
                     "timestream:WriteRecords",
                     "timestream:DescribeTable",
-                    "timestream:DescribeDatabase"
+                    "timestream:DescribeDatabase",
+                    "timestream:DescribeEndpoints",
                 ],
                 resources=[
                     f"arn:aws:timestream:{region}:{account}:database/{timestream_db_name}",
