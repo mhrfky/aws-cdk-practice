@@ -56,8 +56,8 @@ class ProcessingLambdaStack(NestedStack):
             )
         )
         # Add Timestream write permissions
-        region = Stack.of(self).region
-        account = Stack.of(self).account
+        region = NestedStack.of(self).region
+        account = NestedStack.of(self).account
 
         lambda_role.add_to_policy(
             iam.PolicyStatement(
