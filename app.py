@@ -5,6 +5,7 @@ from aws_file_processing.stacks.storage_stack import StorageStack as StorageNest
 from aws_file_processing.stacks.processing_lambda_stack import ProcessingLambdaStack as ProcessingLambdaNestedStack
 from aws_file_processing.stacks.networking_stack import NetworkingStack as NetworkingNestedStack
 from aws_file_processing.stacks.database_stack import DatabaseStack as DatabaseNestedStack
+from aws_file_processing.stacks.backend_api_stack import BackendApiStack
 
 app = cdk.App()
 
@@ -36,5 +37,13 @@ processing_lambda_stack = ProcessingLambdaNestedStack(main_stack, "FileProcessin
                                                     timestream_db_name=database_stack.database_name,
                                                     timestream_events_table_name=database_stack.events_table_name,
                                                     timestream_file_types_table_name=database_stack.file_types_table_name)
+
+# Create backend API nested stack
+api_stack = BackendApiStack(main_stack, "FileProcessingBackend",
+                          vpc=networking_stack.vpc,
+                          timestream_db_name=database_stack.database_name,
+                          timestream_events_table_name=database_stack.events_table_name,
+                          timestream_file_types_table_name=database_stack.file_types_table_name)
+# Note: Removed the env parameter since it's not needed for nested stacks
 
 app.synth()

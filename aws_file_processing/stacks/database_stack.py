@@ -1,12 +1,12 @@
 from aws_cdk import (
-    Stack,
+    NestedStack,
     aws_timestream as timestream,
     aws_ec2 as ec2,
 )
 from constructs import Construct
 
 
-class DatabaseStack(Stack):
+class DatabaseStack(NestedStack):
     def __init__(self, scope: Construct, construct_id: str, *, vpc, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
 

@@ -1,5 +1,5 @@
 from aws_cdk import (
-    Stack,
+    NestedStack,
     Duration,
     aws_lambda as lambda_,
     aws_iam as iam,
@@ -9,7 +9,7 @@ from aws_cdk import (
 from constructs import Construct
 
 
-class ProcessingLambdaStack(Stack):
+class ProcessingLambdaStack(NestedStack):
     def __init__(self, scope: Construct, construct_id: str, *,
                  bucket, queue, vpc, lambda_sg, timestream_db_name,
                  timestream_events_table_name, timestream_file_types_table_name, **kwargs) -> None:

@@ -1,9 +1,12 @@
-name: CDK Deployment
+name: CDK Infrastructure Deployment
 
 on:
   push:
     branches:
       - main
+    paths-ignore:
+      - 'backend-api/**'
+      - '.github/workflows/deploy-api.yml'
   workflow_dispatch:  # Allows manual triggering
 
 jobs:
@@ -34,12 +37,11 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: eu-central-1  # Change to your region
+          aws-region: eu-central-1
 
       - name: Bootstrap CDK
         id: bootstrap
         run: cdk bootstrap
-        # The following line is optional but can be useful for debugging
         continue-on-error: false
 
       - name: CDK Diff (Preview changes)
