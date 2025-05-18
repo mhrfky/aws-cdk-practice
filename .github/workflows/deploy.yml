@@ -42,29 +42,84 @@ jobs:
       - name: Determine changed stacks
         id: changes
         run: |
-          # Use CDK diff to identify which stacks have changes
-          DIFF_OUTPUT=$(cdk diff --all)
-          echo "CHANGES=$DIFF_OUTPUT" >> $GITHUB_OUTPUT
-          
-          # For simplicity in this example, we'll deploy all stacks
-          # But you could parse the diff output to be more selective
-          echo "DEPLOY_ALL=true" >> $GITHUB_OUTPUT
+          # Get the list of all stacks
+          STACKS=$(cdk list)
+
+          # Initialize an empty array for changed stacks
+          CHANGED_STACKS=()
+
+          # Check each stack for changes
+          for STACK in $STACKS; do
+            if cdk diff $STACK 2>&1 | grep -q "No changes"; then
+              echo "$STACK has no changes"
+            else
+              echo "$STACK has changes"
+              CHANGED_STACKS+=("$STACK")
+            fi
+          done
+
+          # If any stacks have changes, set has_changes to true
+          if [ ${#CHANGED_STACKS[@]} -gt 0 ]; then
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            # Join the array with commas for output
+            CHANGED=$(IFS=, ; echo "${CHANGED_STACKS[*]}")
+            echo "changed_stacks=$CHANGED" >> $GITHUB_OUTPUT
+          else
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "changed_stacks=" >> $GITHUB_OUTPUT
+          fi
+
+          # For now, always deploy all stacks
+          echo "deploy_all=true" >> $GITHUB_OUTPUT
 
       - name: Deploy stacks in optimal order
+        if: steps.changes.outputs.has_changes == 'true' || steps.changes.outputs.deploy_all == 'true'
         run: |
-          # If we only need specific stacks, we'd use individual deploy commands
-          # based on the changes detected
-          if [ "${{ steps.changes.outputs.DEPLOY_ALL }}" = "true" ]; then
+          if [ "${{ steps.changes.outputs.deploy_all }}" = "true" ]; then
             # Deploy networking first
             cdk deploy FileProcessingNetwork --require-approval never
-            
+
             # Deploy storage and database in parallel with --exclusively flag
             cdk deploy FileProcessingStorage --exclusively --require-approval never &
             cdk deploy FileProcessingDatabase --exclusively --require-approval never &
             wait
-            
+
             # Deploy compute and API after dependencies are ready
             cdk deploy FileProcessingCompute --require-approval never &
             cdk deploy FileProcessingBackendApi --require-approval never &
             wait
+          else
+            # Deploy only changed stacks in correct order
+            CHANGED_STACKS="${{ steps.changes.outputs.changed_stacks }}"
+
+            # Always deploy networking first if it changed
+            if [[ $CHANGED_STACKS == *"FileProcessingNetwork"* ]]; then
+              cdk deploy FileProcessingNetwork --require-approval never
+            fi
+
+            # Deploy storage and database in parallel if they changed
+            if [[ $CHANGED_STACKS == *"FileProcessingStorage"* ]]; then
+              cdk deploy FileProcessingStorage --exclusively --require-approval never &
+              WAIT_NEEDED=true
+            fi
+
+            if [[ $CHANGED_STACKS == *"FileProcessingDatabase"* ]]; then
+              cdk deploy FileProcessingDatabase --exclusively --require-approval never &
+              WAIT_NEEDED=true
+            fi
+
+            [ "$WAIT_NEEDED" = "true" ] && wait
+
+            # Deploy compute and API after dependencies if they changed
+            if [[ $CHANGED_STACKS == *"FileProcessingCompute"* ]]; then
+              cdk deploy FileProcessingCompute --require-approval never &
+              WAIT_NEEDED=true
+            fi
+
+            if [[ $CHANGED_STACKS == *"FileProcessingBackendApi"* ]]; then
+              cdk deploy FileProcessingBackendApi --require-approval never &
+              WAIT_NEEDED=true
+            fi
+
+            [ "$WAIT_NEEDED" = "true" ] && wait
           fi
