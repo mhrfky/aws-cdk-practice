@@ -1,5 +1,5 @@
 from aws_cdk import (
-    NestedStack,
+    Stack,
     Duration,
     aws_lambda as lambda_,
     aws_iam as iam,
@@ -9,7 +9,7 @@ from aws_cdk import (
 from constructs import Construct
 
 
-class ProcessingLambdaStack(NestedStack):
+class ProcessingLambdaStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, *,
                  bucket, queue, vpc, lambda_sg, timestream_db_name,
                  timestream_events_table_name, timestream_file_types_table_name, **kwargs) -> None:
@@ -56,8 +56,8 @@ class ProcessingLambdaStack(NestedStack):
             )
         )
         # Add Timestream write permissions
-        region = NestedStack.of(self).region
-        account = NestedStack.of(self).account
+        region = Stack.of(self).region
+        account = Stack.of(self).account
 
         lambda_role.add_to_policy(
             iam.PolicyStatement(

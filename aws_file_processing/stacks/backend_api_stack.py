@@ -1,6 +1,6 @@
 # aws_file_processing/stacks/backend_api_stack.py
 from aws_cdk import (
-    NestedStack,
+    Stack,
     RemovalPolicy,
     CfnOutput,  # Add CfnOutput import
     aws_ec2 as ec2,
@@ -12,7 +12,7 @@ from aws_cdk import (
 from constructs import Construct
 
 
-class BackendApiStack(NestedStack):
+class BackendApiStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, *,
                  vpc, timestream_db_name, timestream_events_table_name,
                  timestream_file_types_table_name, **kwargs) -> None:
