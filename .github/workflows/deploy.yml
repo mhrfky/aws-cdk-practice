@@ -2,124 +2,123 @@ name: Deploy Infrastructure
 
 on:
   push:
-    branches: [main]
-  workflow_dispatch:
+    branches:
+      - main
+    paths-ignore:
+      - 'backend-api/**'
+      - '.github/workflows/deploy-api.yml'
+  workflow_dispatch:  # Allows manual triggering
 
 jobs:
-  deploy:
+  setup:
     runs-on: ubuntu-latest
+    outputs:
+      cdk_bootstrapped: ${{ steps.bootstrap.outputs.bootstrapped }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Environment
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install dependencies
-        run: |
-          npm install -g aws-cdk
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
+      - name: Set up CDK environment
+        uses: ./.github/actions/setup-cdk
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: eu-central-1
 
       - name: Bootstrap CDK
-        run: cdk bootstrap
+        id: bootstrap
+        shell: bash
+        run: |
+          cdk bootstrap
+          echo "bootstrapped=true" >> $GITHUB_OUTPUT
         continue-on-error: false
 
-      - name: Determine changed stacks
-        id: changes
-        run: |
-          # Get the list of all stacks
-          STACKS=$(cdk list)
+  deploy_networking:
+    needs: setup
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-          # Initialize an empty array for changed stacks
-          CHANGED_STACKS=()
+      - name: Set up CDK environment
+        uses: ./.github/actions/setup-cdk
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-central-1
 
-          # Check each stack for changes
-          for STACK in $STACKS; do
-            if cdk diff $STACK 2>&1 | grep -q "No changes"; then
-              echo "$STACK has no changes"
-            else
-              echo "$STACK has changes"
-              CHANGED_STACKS+=("$STACK")
-            fi
-          done
+      - name: Deploy Networking Stack
+        shell: bash
+        run: cdk deploy FileProcessingNetwork --require-approval never
 
-          # If any stacks have changes, set has_changes to true
-          if [ ${#CHANGED_STACKS[@]} -gt 0 ]; then
-            echo "has_changes=true" >> $GITHUB_OUTPUT
-            # Join the array with commas for output
-            CHANGED=$(IFS=, ; echo "${CHANGED_STACKS[*]}")
-            echo "changed_stacks=$CHANGED" >> $GITHUB_OUTPUT
-          else
-            echo "has_changes=false" >> $GITHUB_OUTPUT
-            echo "changed_stacks=" >> $GITHUB_OUTPUT
-          fi
+  deploy_storage:
+    needs: deploy_networking
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-          # For now, always deploy all stacks
-          echo "deploy_all=true" >> $GITHUB_OUTPUT
+      - name: Set up CDK environment
+        uses: ./.github/actions/setup-cdk
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-central-1
 
-      - name: Deploy stacks in optimal order
-        if: steps.changes.outputs.has_changes == 'true' || steps.changes.outputs.deploy_all == 'true'
-        run: |
-          if [ "${{ steps.changes.outputs.deploy_all }}" = "true" ]; then
-            # Deploy networking first
-            cdk deploy FileProcessingNetwork --require-approval never
+      - name: Deploy Storage Stack
+        shell: bash
+        run: cdk deploy FileProcessingStorage --require-approval never
 
-            # Deploy storage and database in parallel with --exclusively flag
-            cdk deploy FileProcessingStorage --exclusively --require-approval never &
-            cdk deploy FileProcessingDatabase --exclusively --require-approval never &
-            wait
+  deploy_database:
+    needs: deploy_networking
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-            # Deploy compute and API after dependencies are ready
-            cdk deploy FileProcessingCompute --require-approval never &
-            cdk deploy FileProcessingBackendApi --require-approval never &
-            wait
-          else
-            # Deploy only changed stacks in correct order
-            CHANGED_STACKS="${{ steps.changes.outputs.changed_stacks }}"
+      - name: Set up CDK environment
+        uses: ./.github/actions/setup-cdk
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-central-1
 
-            # Always deploy networking first if it changed
-            if [[ $CHANGED_STACKS == *"FileProcessingNetwork"* ]]; then
-              cdk deploy FileProcessingNetwork --require-approval never
-            fi
+      - name: Deploy Database Stack
+        shell: bash
+        run: cdk deploy FileProcessingDatabase --require-approval never
 
-            # Deploy storage and database in parallel if they changed
-            if [[ $CHANGED_STACKS == *"FileProcessingStorage"* ]]; then
-              cdk deploy FileProcessingStorage --exclusively --require-approval never &
-              WAIT_NEEDED=true
-            fi
+  deploy_lambda:
+    needs: [deploy_storage, deploy_database]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-            if [[ $CHANGED_STACKS == *"FileProcessingDatabase"* ]]; then
-              cdk deploy FileProcessingDatabase --exclusively --require-approval never &
-              WAIT_NEEDED=true
-            fi
+      - name: Set up CDK environment
+        uses: ./.github/actions/setup-cdk
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-central-1
 
-            [ "$WAIT_NEEDED" = "true" ] && wait
+      - name: Deploy Lambda Stack
+        shell: bash
+        run: cdk deploy FileProcessingCompute --require-approval never
 
-            # Deploy compute and API after dependencies if they changed
-            if [[ $CHANGED_STACKS == *"FileProcessingCompute"* ]]; then
-              cdk deploy FileProcessingCompute --require-approval never &
-              WAIT_NEEDED=true
-            fi
+  deploy_api:
+    needs: [deploy_database, deploy_networking]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-            if [[ $CHANGED_STACKS == *"FileProcessingBackendApi"* ]]; then
-              cdk deploy FileProcessingBackendApi --require-approval never &
-              WAIT_NEEDED=true
-            fi
+      - name: Set up CDK environment
+        uses: ./.github/actions/setup-cdk
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-central-1
 
-            [ "$WAIT_NEEDED" = "true" ] && wait
-          fi
+      - name: Deploy API Stack
+        shell: bash
+        run: cdk deploy FileProcessingBackendApi --require-approval never

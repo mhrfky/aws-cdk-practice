@@ -5,18 +5,17 @@ on:
     branches: [main]
     paths:
       - 'backend-api/**'
-      - '.github/workflows/deploy-api.yml'
-  workflow_dispatch:
+  workflow_dispatch:  # Allows manual triggering
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
+      - name: Set up CDK environment
+        uses: ./.github/actions/setup-cdk
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -26,68 +25,85 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v1
 
-      - name: Get ECR repository name
-        id: repo-info
+      - name: Get repository and service info
+        id: get-aws-resources
+        shell: bash
         run: |
+          # Get repository name
           REPO_NAME=$(aws cloudformation list-exports --query "Exports[?Name=='ApiRepositoryName'].Value" --output text)
-          # Set default if CloudFormation export not found
-          if [ -z "$REPO_NAME" ]; then
-            REPO_NAME="file-processing-api"
-          fi
           echo "REPO_NAME=$REPO_NAME" >> $GITHUB_OUTPUT
-
-      - name: Ensure ECR repository exists
-        run: |
-          REPO_NAME="${{ steps.repo-info.outputs.REPO_NAME }}"
-          # Check if repository exists, create it if it doesn't
-          aws ecr describe-repositories --repository-names $REPO_NAME 2>/dev/null || \
-          aws ecr create-repository --repository-name $REPO_NAME
-
-      - name: Build, tag, and push image to Amazon ECR
-        id: build-image
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: ${{ steps.repo-info.outputs.REPO_NAME }}
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          cd backend-api
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-          docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
-          echo "IMAGE=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
-
-      - name: Get ECS service info
-        id: ecs-info
-        run: |
+          
+          # Get cluster name
           CLUSTER_NAME=$(aws cloudformation list-exports --query "Exports[?Name=='ApiClusterName'].Value" --output text)
-          SERVICE_NAME=$(aws cloudformation list-exports --query "Exports[?Name=='ApiServiceName'].Value" --output text)
-          
-          # Set default values if CloudFormation exports not found
-          if [ -z "$CLUSTER_NAME" ]; then
-            CLUSTER_NAME="your-default-cluster-name"  # Replace with your actual default
-          fi
-          
-          if [ -z "$SERVICE_NAME" ]; then
-            SERVICE_NAME="your-default-service-name"  # Replace with your actual default
-          fi
-          
           echo "CLUSTER_NAME=$CLUSTER_NAME" >> $GITHUB_OUTPUT
-          echo "SERVICE_NAME=$SERVICE_NAME" >> $GITHUB_OUTPUT
-
-      - name: Update ECS service
-        run: |
-          CLUSTER_NAME="${{ steps.ecs-info.outputs.CLUSTER_NAME }}"
-          SERVICE_NAME="${{ steps.ecs-info.outputs.SERVICE_NAME }}"
           
-          if [ -n "$CLUSTER_NAME" ] && [ -n "$SERVICE_NAME" ]; then
-            # Check if service exists before updating
-            aws ecs describe-services --cluster $CLUSTER_NAME --services $SERVICE_NAME --query "services[0].status" 2>/dev/null || \
-            (echo "ECS service $SERVICE_NAME does not exist in cluster $CLUSTER_NAME. Please create it first." && exit 1)
-            
-            aws ecs update-service --cluster $CLUSTER_NAME --service $SERVICE_NAME --force-new-deployment
-            echo "Successfully updated ECS service"
-          else
-            echo "Unable to find ECS cluster and service names. Make sure the stack is deployed first."
-            exit 1
-          fi
+          # Get service name
+          SERVICE_NAME=$(aws cloudformation list-exports --query "Exports[?Name=='ApiServiceName'].Value" --output text)
+          echo "SERVICE_NAME=$SERVICE_NAME" >> $GITHUB_OUTPUT
+          
+          # Get task definition family
+          TASK_FAMILY=$(aws cloudformation list-exports --query "Exports[?Name=='ApiTaskDefinitionFamily'].Value" --output text)
+          echo "TASK_FAMILY=$TASK_FAMILY" >> $GITHUB_OUTPUT
+          
+          # Get current task definition ARN
+          TASK_DEF_ARN=$(aws ecs describe-services --cluster $CLUSTER_NAME --services $SERVICE_NAME --query "services[0].taskDefinition" --output text)
+          echo "TASK_DEF_ARN=$TASK_DEF_ARN" >> $GITHUB_OUTPUT
+
+      - name: Build and push Docker image
+        id: build-image
+        shell: bash
+        run: |
+          # Use the repository name from CloudFormation export
+          REPO_NAME="${{ steps.get-aws-resources.outputs.REPO_NAME }}"
+          ECR_REGISTRY="${{ steps.login-ecr.outputs.registry }}"
+          IMAGE="${ECR_REGISTRY}/${REPO_NAME}:latest"
+          
+          # Build and push the image
+          cd backend-api
+          docker build -t $IMAGE .
+          docker push $IMAGE
+          
+          echo "IMAGE=$IMAGE" >> $GITHUB_OUTPUT
+
+      - name: Create new task definition with new image
+        id: task-def
+        shell: bash
+        run: |
+          # Get the current task definition
+          TASK_DEF_ARN="${{ steps.get-aws-resources.outputs.TASK_DEF_ARN }}"
+          aws ecs describe-task-definition \
+            --task-definition $TASK_DEF_ARN \
+            --query taskDefinition > task-definition.json
+          
+          # Update the container image in the task definition
+          NEW_IMAGE="${{ steps.build-image.outputs.IMAGE }}"
+          jq --arg IMAGE "$NEW_IMAGE" \
+            '.containerDefinitions[0].image = $IMAGE' \
+            task-definition.json > new-task-definition.json
+          
+          # Remove fields that can't be included when registering
+          jq 'del(.status, .taskDefinitionArn, .revision, .compatibilities, .registeredAt, .registeredBy, .requiresAttributes)' \
+            new-task-definition.json > final-task-definition.json
+          
+          # Register the new task definition
+          NEW_TASK_DEF=$(aws ecs register-task-definition \
+            --cli-input-json file://final-task-definition.json \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+          
+          echo "NEW_TASK_DEF=$NEW_TASK_DEF" >> $GITHUB_OUTPUT
+
+      - name: Update service with new task definition
+        shell: bash
+        run: |
+          CLUSTER_NAME="${{ steps.get-aws-resources.outputs.CLUSTER_NAME }}"
+          SERVICE_NAME="${{ steps.get-aws-resources.outputs.SERVICE_NAME }}"
+          NEW_TASK_DEF="${{ steps.task-def.outputs.NEW_TASK_DEF }}"
+          
+          aws ecs update-service \
+            --cluster $CLUSTER_NAME \
+            --service $SERVICE_NAME \
+            --task-definition $NEW_TASK_DEF \
+            --force-new-deployment
+          
+          echo "Service update initiated. The deployment is in progress."
